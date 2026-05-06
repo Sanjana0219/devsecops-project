@@ -53,19 +53,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 🔨 Rebuild image (important for multi-job pipelines)
+      # 🔨 Rebuild image (required in multi-job pipelines)
       - name: Build Docker Image
         run: docker build -t devsecops-app .
 
-      # 🛡️ Install Trivy (stable method)
+      # 🛡️ Install Trivy (FIXED using official script)
       - name: Install Trivy
         run: |
           sudo apt-get update
           sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+          wget -qO- https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
-      # 🔍 Scan image
+      # 🔍 Scan Docker image
       - name: Run Trivy Scan
         run: trivy image devsecops-app || true
 
