@@ -61,3 +61,17 @@ jobs:
       with:
         files: .
       continue-on-error: true
+          
+    # 🚀 DEPLOYMENT STAGES (SIMULATED)
+
+    - name: Deploy to Dev
+      if: success()
+      run: echo "Deploying to Dev Environment..."
+
+    - name: Deploy to Staging
+      if: success()
+      run: echo "Deploying to Staging Environment..."
+
+    - name: Deploy to Production
+      if: success()
+      run: echo "Deploying to Production Environment..."
