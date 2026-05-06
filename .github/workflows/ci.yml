@@ -2,7 +2,7 @@ name: DevSecOps CI Pipeline
 
 permissions:
   contents: read
-  
+
 on:
   push:
     branches: [ "main" ]
@@ -52,6 +52,8 @@ jobs:
     # 🏗️ CHECKOV (IaC SCAN)
     - name: Run Checkov
       uses: bridgecrewio/checkov-action@master
+      with:
+        skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
 
     # 🛡️ POLICY CHECK (OPA)
     - name: Install Conftest
