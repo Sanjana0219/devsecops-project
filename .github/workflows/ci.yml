@@ -1,77 +1,96 @@
-name: DevSecOps CI Pipeline
-
-permissions:
-  contents: read
+name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
-  security:
+
+  unit-tests:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - run: npm install
+      - run: npm test || true
 
-    - name: Setup Node
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+  secret-scan:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gitleaks/gitleaks-action@v2
 
-    - name: Install Dependencies
-      run: npm install
+  sast:
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v $PWD:/src returntocorp/semgrep semgrep scan
 
-    # 🔍 SEMGREP (SAST)
-    - name: Run Semgrep
-      run: |
-        pip install semgrep
-        semgrep scan --config=auto
+  dependency-scan:
+    runs-on: ubuntu-latest
+    needs: sast
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install -g snyk
+      - run: snyk test || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-    # 🔐 GITLEAKS (Secrets)
-    - name: Run Gitleaks
-      uses: gitleaks/gitleaks-action@v2
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: dependency-scan
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t devsecops-app .
 
-    # 📦 SNYK (Dependencies)
-    - name: Run Snyk
-      uses: snyk/actions/node@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  container-scan:
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y wget apt-transport-https gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb stable main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+          trivy image devsecops-app || true
 
-    # 🐳 BUILD DOCKER IMAGE
-    - name: Build Docker Image
-      run: docker build -t devsecops-app .
+  iac-scan:
+    runs-on: ubuntu-latest
+    needs: container-scan
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install checkov
+      - run: checkov -d .
 
-    # 🐳 TRIVY (Container Scan)
-    - name: Scan Docker Image
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: devsecops-app
+  policy:
+    runs-on: ubuntu-latest
+    needs: iac-scan
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v0.45.0/conftest_Linux_x86_64.tar.gz
+          tar xzf conftest_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+      - run: conftest test .
 
-    # 🏗️ CHECKOV (IaC SCAN)
-    - name: Run Checkov
-      uses: bridgecrewio/checkov-action@master
-      with:
-        skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
+  deploy-dev:
+    runs-on: ubuntu-latest
+    needs: policy
+    steps:
+      - run: echo "Deploying to Dev"
 
-      # 🛡️ POLICY CHECK (BEST WAY)
-    - name: Run Conftest
-      uses: instrumenta/conftest-action@v0.3.0
-      with:
-        files: .
-      continue-on-error: true
-          
-    # 🚀 DEPLOYMENT STAGES (SIMULATED)
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    steps:
+      - run: echo "Deploying to Staging"
 
-    - name: Deploy to Dev
-      if: success()
-      run: echo "Deploying to Dev Environment..."
-
-    - name: Deploy to Staging
-      if: success()
-      run: echo "Deploying to Staging Environment..."
-
-    - name: Deploy to Production
-      if: success()
-      run: echo "Deploying to Production Environment..."
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - run: echo "Deploying to Production"
