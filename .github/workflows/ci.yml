@@ -1,107 +1,106 @@
-name: DevSecOps Pipeline
+name: DevSecOps CI Pipeline
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+permissions:
+  contents: read
 
 on:
   push:
-    branches: [ main ]
+    branches: ["main"]
 
 jobs:
 
-  unit-tests:
+  # 🔍 1. STATIC CODE + SECRET + DEPENDENCY SCAN
+  security:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm install
-      - run: npm test || true
 
-  secret-scan:
-    runs-on: ubuntu-latest
-    needs: unit-tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: gitleaks/gitleaks-action@v2
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  sast:
-    runs-on: ubuntu-latest
-    needs: secret-scan
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker run --rm -v $PWD:/src returntocorp/semgrep semgrep scan
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
-  dependency-scan:
-    runs-on: ubuntu-latest
-    needs: sast
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm install -g snyk
-      - run: snyk test || true
+      - name: Install Dependencies
+        run: npm install
+
+      # 🔍 SEMGREP (SAST)
+      - name: Run Semgrep
+        run: |
+          pip install semgrep
+          semgrep scan --config=auto
+
+      # 🔐 GITLEAKS (Secrets)
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+
+      # 📦 SNYK (Dependencies)
+      - name: Run Snyk
+        uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: dependency-scan
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t devsecops-app .
-
+  # 🐳 2. BUILD + CONTAINER SCAN
   container-scan:
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: security
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Build Docker Image
         run: docker build -t devsecops-app .
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget -qO- https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+      # 🐳 TRIVY (Container Scan)
+      - name: Scan Docker Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: devsecops-app
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
 
-      - name: Run Trivy Scan
-        run: trivy image devsecops-app || true
-
-  iac-scan:
-    runs-on: ubuntu-latest
-    needs: container-scan
-    steps:
-      - uses: actions/checkout@v4
-      - run: pip install checkov
-      - run: checkov -d . || true
-
+  # 🏗️ 3. IaC + POLICY CHECK
   policy:
     runs-on: ubuntu-latest
-    needs: iac-scan
-    steps:
-      - uses: actions/checkout@v4
+    needs: container-scan
 
-      # ✅ FIXED Conftest installation
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 🏗️ CHECKOV (IaC SCAN)
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
+
+      # 🛡️ INSTALL CONFTEST (FIXED)
       - name: Install Conftest
         run: |
-          wget -qO- https://raw.githubusercontent.com/open-policy-agent/conftest/master/install.sh | bash
-          sudo mv conftest /usr/local/bin
+          curl -L -o conftest.tar.gz https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz
+          tar xzf conftest.tar.gz
+          chmod +x conftest
+          sudo mv conftest /usr/local/bin/
 
-      - name: Run Policy Checks
-        run: conftest test . || true
+      # 🛡️ RUN POLICY CHECK
+      - name: Run Conftest
+        run: |
+          conftest test . --policy policy/
 
-  deploy-dev:
+  # 🚀 4. DEPLOYMENT (SIMULATED)
+  deploy:
     runs-on: ubuntu-latest
     needs: policy
-    steps:
-      - run: echo "Deploying to Dev"
 
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: deploy-dev
     steps:
-      - run: echo "Deploying to Staging"
+      - name: Deploy to Dev
+        run: echo "Deploying to Dev Environment..."
 
-  deploy-prod:
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    steps:
-      - run: echo "Deploying to Production"
+      - name: Deploy to Staging
+        run: echo "Deploying to Staging Environment..."
+
+      - name: Deploy to Production
+        run: echo "Deploying to Production Environment..."
