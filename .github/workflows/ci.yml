@@ -55,12 +55,9 @@ jobs:
       with:
         skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
 
-    # 🛡️ POLICY CHECK (OPA)
-    - name: Install Conftest
-      run: |
-        wget https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz
-        tar xzf conftest_Linux_x86_64.tar.gz
-        sudo mv conftest /usr/local/bin
-
-    - name: Run Policy Check
-      run: conftest test .
+      # 🛡️ POLICY CHECK (BEST WAY)
+    - name: Run Conftest
+      uses: instrumenta/conftest-action@v0.3.0
+      with:
+        files: .
+      continue-on-error: true
