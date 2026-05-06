@@ -9,75 +9,83 @@ on:
 
 jobs:
 
-  # 🔍 1. STATIC CODE + SECRET + DEPENDENCY SCAN
-  security:
+  # 🧪 1. UNIT TESTS
+  unit-tests:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
+      - run: npm install
+      - name: Run Tests
+        run: npm test
 
-      - name: Install Dependencies
-        run: npm install
+  # 🔐 2. SECRET SCAN (Gitleaks)
+  secret-scan:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
 
-      # 🔍 SEMGREP (SAST)
+  # 🔍 3. SAST (Semgrep)
+  sast:
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
       - name: Run Semgrep
         run: |
           pip install semgrep
           semgrep scan --config=auto
 
-      # 🔐 GITLEAKS (Secrets)
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-
-      # 📦 SNYK (Dependencies)
+  # 📦 4. DEPENDENCY SCAN (Snyk)
+  dependency-scan:
+    runs-on: ubuntu-latest
+    needs: sast
+    steps:
+      - uses: actions/checkout@v4
       - name: Run Snyk
         uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-  # 🐳 2. BUILD + CONTAINER SCAN
-  container-scan:
+  # 🐳 5. DOCKER BUILD + SCAN
+  docker:
     runs-on: ubuntu-latest
-    needs: security
-
+    needs: dependency-scan
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Build Docker Image
         run: docker build -t devsecops-app .
 
-      # 🐳 TRIVY (Container Scan)
-      - name: Scan Docker Image
+      - name: Scan Docker Image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: devsecops-app
-          format: table
-          exit-code: 1
           severity: CRITICAL,HIGH
+          exit-code: 1
 
-  # 🏗️ 3. IaC + POLICY CHECK
-  policy:
+  # 🏗️ 6. IaC SCAN (Checkov)
+  iac:
     runs-on: ubuntu-latest
-    needs: container-scan
-
+    needs: docker
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # 🏗️ CHECKOV (IaC SCAN)
+      - uses: actions/checkout@v4
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
         with:
-          skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
+          skip_check: CKV_AWS_18,CKV_AWS_144
 
-      # 🛡️ INSTALL CONFTEST (FIXED)
+  # 🛡️ 7. POLICY CHECK (Conftest)
+  policy:
+    runs-on: ubuntu-latest
+    needs: iac
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Install Conftest
         run: |
           curl -L -o conftest.tar.gz https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz
@@ -85,22 +93,29 @@ jobs:
           chmod +x conftest
           sudo mv conftest /usr/local/bin/
 
-      # 🛡️ RUN POLICY CHECK
       - name: Run Conftest
-        run: |
-          conftest test . --policy policy/
+        run: conftest test . --policy policy/
 
-  # 🚀 4. DEPLOYMENT (SIMULATED)
-  deploy:
+  # 🚀 8. DEPLOY DEV
+  deploy-dev:
     runs-on: ubuntu-latest
     needs: policy
-
     steps:
       - name: Deploy to Dev
         run: echo "Deploying to Dev Environment..."
 
+  # 🚀 9. DEPLOY STAGING
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    steps:
       - name: Deploy to Staging
         run: echo "Deploying to Staging Environment..."
 
+  # 🚀 10. DEPLOY PROD
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
       - name: Deploy to Production
         run: echo "Deploying to Production Environment..."
